@@ -17,8 +17,11 @@
 package io.netty.buffer;
 
 import io.netty.util.ByteProcessor;
+import io.netty.util.IllegalReferenceCountException;
 import io.netty.util.ResourceLeakDetector;
 import io.netty.util.ResourceLeakTracker;
+import io.netty.util.TrackedIllegalReferenceCountException;
+import io.netty.util.internal.StringUtil;
 import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
@@ -926,25 +929,50 @@ final class AdvancedLeakAwareByteBuf extends SimpleLeakAwareByteBuf {
     @Override
     public ByteBuf retain() {
         leak.record();
-        return super.retain();
+        try {
+            return super.retain();
+        } catch (IllegalReferenceCountException e) {
+            throw handleIllegalReferenceCountException(e);
+        }
     }
 
     @Override
     public ByteBuf retain(int increment) {
         leak.record();
-        return super.retain(increment);
+        try {
+            return super.retain(increment);
+        } catch (IllegalReferenceCountException e) {
+            throw handleIllegalReferenceCountException(e);
+        }
     }
 
     @Override
     public boolean release() {
         leak.record();
-        return super.release();
+        try {
+            return super.release();
+        } catch (IllegalReferenceCountException e) {
+            throw handleIllegalReferenceCountException(e);
+        }
     }
 
     @Override
     public boolean release(int decrement) {
         leak.record();
-        return super.release(decrement);
+        try {
+            return super.release(decrement);
+        } catch (IllegalReferenceCountException e) {
+            throw handleIllegalReferenceCountException(e);
+        }
+    }
+
+    private IllegalReferenceCountException handleIllegalReferenceCountException(IllegalReferenceCountException e) {
+        String accessRecord = leak.toString();
+        if (StringUtil.isNullOrEmpty(accessRecord)) {
+            // means leak has been closed and there is no accessRecord.
+            return e;
+        }
+        return new TrackedIllegalReferenceCountException(accessRecord, e);
     }
 
     @Override

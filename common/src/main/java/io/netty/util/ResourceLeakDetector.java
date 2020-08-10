@@ -23,15 +23,14 @@ import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
-import java.lang.ref.WeakReference;
 import java.lang.ref.ReferenceQueue;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
@@ -113,7 +112,7 @@ public class ResourceLeakDetector<T> {
             disabled = false;
         }
 
-        Level defaultLevel = disabled? Level.DISABLED : DEFAULT_LEVEL;
+        Level defaultLevel = disabled ? Level.DISABLED : DEFAULT_LEVEL;
 
         // First read old property name
         String levelStr = SystemPropertyUtil.get(PROP_LEVEL_OLD, defaultLevel.name());
@@ -137,7 +136,7 @@ public class ResourceLeakDetector<T> {
      */
     @Deprecated
     public static void setEnabled(boolean enabled) {
-        setLevel(enabled? Level.SIMPLE : Level.DISABLED);
+        setLevel(enabled ? Level.SIMPLE : Level.DISABLED);
     }
 
     /**
@@ -261,7 +260,7 @@ public class ResourceLeakDetector<T> {
             return null;
         }
         reportLeak();
-        return new DefaultResourceLeak(obj, refQueue, allLeaks);
+        return new AdvancedResourceLeak(obj, refQueue, allLeaks);
     }
 
     private void clearRefQueue() {
@@ -343,12 +342,37 @@ public class ResourceLeakDetector<T> {
     protected void reportInstancesLeak(String resourceType) {
     }
 
+    /**
+     * This is an enhanced version of ResourceLeak.
+     * It will not clean up records when it is closed, because we may still use records in the future.
+     */
+    private static final class AdvancedResourceLeak<T> extends DefaultResourceLeak<T> {
+
+        AdvancedResourceLeak(
+                Object referent,
+                ReferenceQueue<Object> refQueue,
+                Set<DefaultResourceLeak<?>> allLeaks) {
+            super(referent, refQueue, allLeaks);
+        }
+
+        @Override
+        public boolean close() {
+            if (allLeaks.remove(this)) {
+                // Call clear so the reference is not even enqueued.
+                clear();
+                // We didn't use `headUpdater.set(this, null)` to clear head immediately.
+                return true;
+            }
+            return false;
+        }
+    }
+
     @SuppressWarnings("deprecation")
-    private static final class DefaultResourceLeak<T>
+    private static class DefaultResourceLeak<T>
             extends WeakReference<Object> implements ResourceLeakTracker<T>, ResourceLeak {
 
         @SuppressWarnings("unchecked") // generics and updaters do not mix.
-        private static final AtomicReferenceFieldUpdater<DefaultResourceLeak<?>, Record> headUpdater =
+        protected static final AtomicReferenceFieldUpdater<DefaultResourceLeak<?>, Record> headUpdater =
                 (AtomicReferenceFieldUpdater)
                         AtomicReferenceFieldUpdater.newUpdater(DefaultResourceLeak.class, Record.class, "head");
 
@@ -362,7 +386,7 @@ public class ResourceLeakDetector<T> {
         @SuppressWarnings("unused")
         private volatile int droppedRecords;
 
-        private final Set<DefaultResourceLeak<?>> allLeaks;
+        protected final Set<DefaultResourceLeak<?>> allLeaks;
         private final int trackedHash;
 
         DefaultResourceLeak(
@@ -541,14 +565,14 @@ public class ResourceLeakDetector<T> {
             if (duped > 0) {
                 buf.append(": ")
                         .append(duped)
-                        .append(" leak records were discarded because they were duplicates")
+                        .append(" access records were discarded because they were duplicates")
                         .append(NEWLINE);
             }
 
             if (dropped > 0) {
                 buf.append(": ")
                    .append(dropped)
-                   .append(" leak records were discarded because the leak record count is targeted to ")
+                   .append(" access records were discarded because the access record count is targeted to ")
                    .append(TARGET_RECORDS)
                    .append(". Use system property ")
                    .append(PROP_TARGET_RECORDS)
