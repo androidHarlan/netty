@@ -25,6 +25,7 @@ import javax.crypto.NoSuchPaddingException;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSessionContext;
 import java.io.File;
 import java.io.IOException;
@@ -189,6 +190,7 @@ public class JdkSslContext extends SslContext {
     private final ClientAuth clientAuth;
     private final SSLContext sslContext;
     private final boolean isClient;
+    private final String endpointIdentificationAlgorithm;
 
     /**
      * Creates a new {@link JdkSslContext} from a pre-configured {@link SSLContext}.
@@ -203,7 +205,7 @@ public class JdkSslContext extends SslContext {
     public JdkSslContext(SSLContext sslContext, boolean isClient,
                          ClientAuth clientAuth) {
         this(sslContext, isClient, null, IdentityCipherSuiteFilter.INSTANCE,
-                JdkDefaultApplicationProtocolNegotiator.INSTANCE, clientAuth, null, false);
+                JdkDefaultApplicationProtocolNegotiator.INSTANCE, clientAuth, null, false, null);
     }
 
     /**
@@ -252,12 +254,14 @@ public class JdkSslContext extends SslContext {
                 toNegotiator(apn, !isClient),
                 clientAuth,
                 protocols == null ? null : protocols.clone(),
-                startTls);
+                startTls,
+                null);
     }
 
     @SuppressWarnings("deprecation")
     JdkSslContext(SSLContext sslContext, boolean isClient, Iterable<String> ciphers, CipherSuiteFilter cipherFilter,
-                  JdkApplicationProtocolNegotiator apn, ClientAuth clientAuth, String[] protocols, boolean startTls) {
+                  JdkApplicationProtocolNegotiator apn, ClientAuth clientAuth, String[] protocols, boolean startTls,
+                  String endpointIdentificationAlgorithm) {
         super(startTls);
         this.apn = requireNonNull(apn, "apn");
         this.clientAuth = requireNonNull(clientAuth, "clientAuth");
@@ -305,6 +309,7 @@ public class JdkSslContext extends SslContext {
 
         unmodifiableCipherSuites = Collections.unmodifiableList(Arrays.asList(cipherSuites));
         this.isClient = isClient;
+        this.endpointIdentificationAlgorithm = endpointIdentificationAlgorithm;
     }
 
     /**
@@ -343,7 +348,13 @@ public class JdkSslContext extends SslContext {
 
     @Override
     public final SSLEngine newEngine(BufferAllocator alloc, String peerHost, int peerPort) {
-        return configureAndWrapEngine(context().createSSLEngine(peerHost, peerPort), alloc);
+        SSLEngine engine = context().createSSLEngine(peerHost, peerPort);
+        if (isClient() && endpointIdentificationAlgorithm != null && peerHost != null) {
+            SSLParameters sslParameters = engine.getSSLParameters();
+            sslParameters.setEndpointIdentificationAlgorithm(endpointIdentificationAlgorithm);
+            engine.setSSLParameters(sslParameters);
+        }
+        return configureAndWrapEngine(engine, alloc);
     }
 
     @SuppressWarnings("deprecation")
