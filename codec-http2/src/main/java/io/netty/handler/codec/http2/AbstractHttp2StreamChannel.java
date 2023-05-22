@@ -583,6 +583,8 @@ abstract class AbstractHttp2StreamChannel extends DefaultAttributeMap implements
         @SuppressWarnings("deprecation")
         private RecvByteBufAllocator.Handle recvHandle;
         private boolean writeDoneAndNoFlush;
+        private boolean windowUpdateFrameWritten;
+
         private boolean closeInitiated;
         private boolean readEOS;
 
@@ -811,7 +813,9 @@ abstract class AbstractHttp2StreamChannel extends DefaultAttributeMap implements
                     }
                     // We need to double check that there is nothing left to flush such as a
                     // window update frame.
-                    flush();
+                    if (windowUpdateFrameWritten) {
+                        flush();
+                    }
                     break;
                 }
                 final RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
@@ -843,6 +847,9 @@ abstract class AbstractHttp2StreamChannel extends DefaultAttributeMap implements
                 int bytes = flowControlledBytes;
                 flowControlledBytes = 0;
                 ChannelFuture future = write0(parentContext(), new DefaultHttp2WindowUpdateFrame(bytes).stream(stream));
+
+                windowUpdateFrameWritten = true;
+
                 // window update frames are commonly swallowed by the Http2FrameCodec and the promise is synchronously
                 // completed but the flow controller _may_ have generated a wire level WINDOW_UPDATE. Therefore we need,
                 // to assume there was a write done that needs to be flushed or we risk flow control starvation.
@@ -1042,6 +1049,7 @@ abstract class AbstractHttp2StreamChannel extends DefaultAttributeMap implements
             // We need to set this to false before we call flush0(...) as ChannelFutureListener may produce more data
             // that are explicit flushed.
             writeDoneAndNoFlush = false;
+            windowUpdateFrameWritten = false;
             flush0(parentContext());
         }
 
